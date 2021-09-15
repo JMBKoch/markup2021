@@ -1,0 +1,113 @@
+---
+title: "Assignment1"
+author: "Michael Koch"
+date: "9/15/2021"
+output: html_document
+---
+
+
+```{r}
+set.seed(0704)
+```
+
+```{r, warning=F, message=F}
+library(tidyverse)
+library(kableExtra)
+```
+
+In this Exercise, I'm performing a little [Monte Carlo](https://www.youtube.com/watch?v=PQCYjl32_Sk) simulation study which is ought to illustrate the following:
+
+**"A replication of the procedure that generates a 95% confidence interval that is centered around the sample mean would cover the population value at least 95 out of 100 times"** [(Neyman, 1934)](http://www.stat.cmu.edu/~brian/905-2008/papers/neyman-1934-jrss.pdf). 
+
+
+First, I need to sample 100 samples (N = 10000) from a standard normal distribution, and calculate the following quantities from the samples:
+
+ - absolute bias
+ - standard error
+ - lower bound & upperbound of the 95% C.I.
+
+
+In order to take the samples, I copy Gerko's approach from class, where I take advantage of `plyr::rlply`. 
+
+```{r}
+samples <- plyr::rlply(100, rnorm(10000, 0, 1))
+```
+
+
+To tackle the sample statistics, I first write a helper function `CalculateSampStats()`, which I can later use very straightforwardly within a pipe, as Gerko has illustrated in class.
+
+```{r}
+CalculateSampStats <- function(samples){
+  
+  n <- length(samples)
+  mean <- mean(samples)
+  bias <- abs(0-mean) 
+  df <- n - 1
+  se <- 1/ sqrt(n)
+  z <- qnorm(1-0.05/2)
+  lowerBound <- mean - z*se
+  upperBound <- mean + z*se
+    
+  output <- c(mean = mean,
+              bias = bias, 
+              se = se, 
+              lower = lowerBound, 
+              upper = upperBound)
+  return(output)
+  
+}
+
+# for calling vapply
+format <- c("mean" = 0, "bias" = 0, "se" = 0, "lower" = 0, "upper" = 0)
+
+```
+
+Now I can  `vapply` my function to all samples, using pipes. This is a use-case where `vapply` shines, as chosing my own output format is quite handy here. Note that I'm also adding a dummy variable in this step, that is 1 whenever the C.I. contains the true mean $\mu = 0$. The mean of this variable later represents the percentage of 95% C.I.'s covering the true value of 0. 
+
+```{r}
+sampStats <- 
+  samples %>% 
+    vapply(., CalculateSampStats, format ) %>% 
+    t %>% 
+    as_tibble %>% 
+    mutate(covers = ifelse(lower < 0 & upper > 0, 1, 0))
+```
+
+
+```{r}
+mean(sampStats$covers)
+```
+
+Now, it seems that **approximately** 95% of the 95% confidence interval do cover the true value - brilliant. 
+
+We can make a plot to illustrate this further. I'm using `ggplot's` `geom_pointrage` for this - the perfect geom for this purpose. 
+
+```{r}
+# specify limits for geom_pointrage
+lims <- aes(ymax = upper, ymin = lower, col = as.factor(covers))
+
+sampStats %>% 
+  ggplot(aes(y = mean, x = 1:100))+
+  geom_pointrange(lims)+
+  labs(x = NULL,
+       col = "Covered", 
+       main = "")
+```
+\ 
+
+Indeed, we can see that 3 out of 100 (3%) do not contain the true value of $\mu = 0$.
+
+\ 
+
+At last, I add a nice table with the sample stats of those samples where the C.I. did not contain the true mean. Nice tables can be done with `kable()`. By the way, there's also a bunch of packages for APA-style tables (I recommend just using [`papaja`](https://github.com/crsh/papaja)).
+
+\ 
+
+```{r}
+sampStats %>% 
+  filter(covers == 0) %>% 
+  kable() %>% 
+  kable_styling(full_width = T)
+```
+
+\ 
