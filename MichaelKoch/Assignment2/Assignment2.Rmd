@@ -1,0 +1,144 @@
+---
+title: "Assignment 2"
+author: "Michael Koch"
+date: "11/2/2021"
+output: html_document
+---
+
+# Introduction
+
+In this assignment I am conducting a mini-study, that serves to test the level of bias in a gibbs sampler for a simple linear regression, that I've programmed before. In order for thje process to be reproducible, I'm setting a seed.
+
+```{r}
+set.seed(123)
+```
+
+
+# Simulating data
+
+Now, a simple linear regression model is 
+
+$$y_i = b_0 + b1*x1_i + e_i$$
+
+We assume that the error is normally distributed with mean zero and a standard deviation of 1:
+
+$$ e \sim \mathcal{N}(0, \ 1)$$
+
+```{r}
+e <- rnorm(200, 0, 1)
+```
+
+
+Furthermore, we assume that the predictor $x1$ is normally distributed with mean 1 and standard deviation of 0.5. 
+
+```{r}
+x1 <- rnorm(200, 1, 0.5)
+```
+
+Finally, we set the true intercept $b_0$ to be 0.5, and the true slope $b_1$ to 0.3.
+
+Now, we can simulate the outcome under the model
+
+```{r}
+y <- 0.5 + 0.3*x1 + e
+```
+
+```{r}
+data <- data.frame(y = y, x1 = x1)
+```
+
+# Writing Gibbs Sampler Function
+
+This function is from a previous assignment. It is very general and also allows for several predictors, interaction terms, etc. The function uses non-informative priors. 
+
+```{r}
+#start outer function
+gibbs_mlr <- function(formula, n_chain = 2, n_iter = 1000, n_burnin = 5000, 
+                      starting_values, data){
+
+# start inner function
+gibbs_mlr_chain <- function(formula, n_iter = 10000, n_burnin = 1000, 
+                            starting_values, data){
+  # extract outcome 
+  y <- model.frame(formula, data)[, 1]
+  # extract model matrix 
+  terms <- terms.formula(formula)
+  X <- model.matrix(terms, data)
+  # pre-calculations
+  XX_t <- t(X)%*%X
+  XX_t_i <- solve(XX_t)
+  beta_ml <- solve(XX_t, t(X) %*%y)
+  n <- nrow(data)
+  # allocate memory for output
+  parameters <-  matrix(NA, nrow = (n_iter + n_burnin), ncol =  ncol(X)+1)
+  # extract starting values
+  beta <- starting_values$beta
+  sigma2  <- starting_values$sigma2
+  # sample from conditional posterior
+  for (i in 1:(n_iter+n_burnin)){
+    beta <- MASS::mvrnorm(n = 1, beta_ml, sigma2 * XX_t_i)
+    sigma2 <- 1/ rgamma(1, shape = n/2, rate = t(y-X%*%beta)%*%(y-X%*%beta) *.5)
+    ## save output
+    parameters[i, 1:ncol(X)] <- beta
+    parameters[i, ncol(X)+1] <- sqrt(sigma2) # transform variance into sd to resemble freq. mlr
+  }
+  # recode burnin samples to NA & remove
+  parameters[1:n_burnin, ] <- NA
+  parameters <- na.omit(as.data.frame(parameters))
+  colnames(parameters) <-  c(sapply(0:(ncol(X)-1), function(x)(paste("b", as.character(x), sep = ""))), "sigma")
+  return(parameters)
+
+}
+# continue with outer function
+output_sep <- list()
+out_togeth <- 
+for (i in 1:n_chain){      
+# apply sampling per chain
+  output_sep[[i]] <- gibbs_mlr_chain(formula = formula, n_iter = n_iter, n_burnin = n_burnin, starting_values = starting_values[[i]], data = data)
+  out_togeth <- data.frame()
+}
+# structure final output nicely 
+ for(i in 1:length(output_sep)){
+    output_sep[[i]]$chain <- i
+  }
+  for(i in 1:length(output_sep)){
+    out_togeth <- rbind(out_togeth, output_sep[[i]])
+  }
+# return final output
+return(out_togeth)
+}
+```
+
+# Running the Function and Checking the Bias
+
+Now, what's left is to run the function
+
+
+```{r}
+# specify starting values
+starting_values <- list(
+  chain1 = list(beta = c(0, 1), sigma2 = 1),
+  chain2 = list(beta = c(2, -1.5), sigma2 = 2.5) 
+)
+```
+
+
+```{r}
+out <- gibbs_mlr(y~x1, starting_values = starting_values, data =  data)
+```
+
+I can acquire the estimates
+
+```{r}
+purrr::map_df(out, mean)
+```
+
+The bias in the estimates can be computes by taking the absolute value of the difference with the true value
+
+```{r}
+abs(purrr::map_df(out, mean) - c(0.5, 0.3, 1))
+```
+
+
+
+EOF
